@@ -122,7 +122,7 @@ class VGGFeatureExtractor(nn.Module):
                 modified_net[k] = v
 
         self.vgg_net = nn.Sequential(modified_net)
-
+        self.vgg_net = self.vgg_net.cuda()
         if not requires_grad:
             self.vgg_net.eval()
             for param in self.parameters():
@@ -150,7 +150,7 @@ class VGGFeatureExtractor(nn.Module):
         if self.range_norm:
             x = (x + 1) / 2
         if self.use_input_norm:
-            x = (x - self.mean) / self.std
+            x = (x - self.mean.cuda()) / self.std.cuda()
 
         output = {}
         for key, layer in self.vgg_net._modules.items():

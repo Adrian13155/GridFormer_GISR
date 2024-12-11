@@ -8,6 +8,8 @@ date: 06/29/22
 """
 
 # --- Imports --- #
+import sys
+sys.path.append("/home/cjj/projects/AIO_compare/GridFormer")
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -333,10 +335,12 @@ class reconstruct(nn.Module):
         return x
 
 
-@ARCH_REGISTRY.register()
+# @ARCH_REGISTRY.register()
 # --- Main model  --- #
 class GridFormer(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3,dim=48, kernel_size=3, stride=2, height=3, width=6, num_blocks=[2,3,4],growthRate=16,nDenselayer=3,
+    def __init__(self, #in_channels=3, out_channels=3,
+                 dim=48, kernel_size=3, stride=2, height=3, width=6, num_blocks=[2,3,4],
+                 growthRate=16,nDenselayer=3,
                  heads=[2, 4, 8], attention=True, windows=4, sample_rate_trunk =[4,2,2], scale=1):
         super(GridFormer, self).__init__()
         self.TBM_module = nn.ModuleDict()
@@ -352,9 +356,16 @@ class GridFormer(nn.Module):
         self.coefficient = nn.Parameter(torch.Tensor(np.ones((height, width, 2, dim * stride ** (height - 1)))),
                                         requires_grad=attention)
 
-        self.conv_in = OverlapPatchEmbed(in_channels, dim)
-        self.conv_out = nn.Conv2d(dim, out_channels, kernel_size=kernel_size,
-                                  padding=(kernel_size - 1) // 2)
+        # self.conv_in = OverlapPatchEmbed(in_channels, dim)
+        self.patch_embed_dep = OverlapPatchEmbed(4, dim) # depth
+        self.patch_embed_mri = OverlapPatchEmbed(2, dim) # mri
+        self.patch_embed_pan = OverlapPatchEmbed(5, dim) # pan
+        # self.conv_out = nn.Conv2d(dim, out_channels, kernel_size=kernel_size,
+        #                           padding=(kernel_size - 1) // 2)
+
+        self.output1 = nn.Conv2d(dim, 1, kernel_size=kernel_size,padding=(kernel_size - 1) // 2) # depth
+        self.output2 = nn.Conv2d(dim, 1, kernel_size=kernel_size,padding=(kernel_size - 1) // 2) # mri
+        self.output3 = nn.Conv2d(dim, 4, kernel_size=kernel_size,padding=(kernel_size - 1) // 2) # pan
 
         # self.TBM_in = TBM(dim=dim, num_blocks=num_blocks[0],
         #                   heads=1,sample_rate=sample_rate_trunk[0])
@@ -376,8 +387,10 @@ class GridFormer(nn.Module):
             for j in range(width // 2):
                 # self.downsample_module.update({'{}_{}'.format(i, j): DownSample(_in_channels)})
                 if j==0:
-                    self.downsample_module.update({'{}_{}'.format(i, j): DownSample(_in_channels)})
-                    self.extractor_module.update({'{}_{}'.format(i, j): extractor(in_c=in_channels, n_feat=_in_channels*2,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})
+                    self.downsample_module.update({'{}_{}'.format(i, j,): DownSample(_in_channels)})
+                    self.extractor_module.update({'{}_{}_{}'.format(i, j,"dep"): extractor(in_c=1, n_feat=_in_channels*2,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})
+                    self.extractor_module.update({'{}_{}_{}'.format(i, j,"mri"): extractor(in_c=1, n_feat=_in_channels*2,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})
+                    self.extractor_module.update({'{}_{}_{}'.format(i, j,"pan"): extractor(in_c=4, n_feat=_in_channels*2,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})
                 else:
                     self.downsample_module.update({'{}_{}'.format(i, j): DownSample(_in_channels)})
             _in_channels *= stride
@@ -388,7 +401,9 @@ class GridFormer(nn.Module):
 
                 if j ==width-1:
                     self.upsample_module.update({'{}_{}'.format(i, j): UpSample(_in_channels)})
-                    self.reconstruct_module.update({'{}_{}'.format(i, j): reconstruct(in_c=_in_channels, n_feat=out_channels,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})    ########### tail 3x3 convolution
+                    self.reconstruct_module.update({'{}_{}_{}'.format(i, j,"dep"): reconstruct(in_c=_in_channels, n_feat=1,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})    ########### tail 3x3 convolution
+                    self.reconstruct_module.update({'{}_{}_{}'.format(i, j,"mri"): reconstruct(in_c=_in_channels, n_feat=1,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})
+                    self.reconstruct_module.update({'{}_{}_{}'.format(i, j,"pan"): reconstruct(in_c=_in_channels, n_feat=4,num_blocks=num_blocks[i],sample_rate=sample_rate_trunk[i])})
                 else:
                     self.upsample_module.update({'{}_{}'.format(i, j): UpSample(_in_channels)})
 
@@ -396,15 +411,21 @@ class GridFormer(nn.Module):
             _in_channels //= stride
 
 
-    def forward_features(self, x):
+    def forward_features(self, inp_ms, inp_pan):
 
         Image_index = [ 0 for _ in range(self.height)]
-        Image_index[0] = x
+        Image_index[0] = inp_ms
         for i in range(1,self.height):
             Image_index[i] = F.interpolate(Image_index[i-1], scale_factor=0.5, mode='bilinear',recompute_scale_factor=True,align_corners=False)
-
-
-        inp = self.conv_in(x)
+        x = torch.concat([inp_ms, inp_pan],dim=1)
+        _,C,_,_ = x.shape
+        if C == 4:  # depth
+            inp = self.patch_embed_dep(x)
+        elif C ==2: # mri
+            inp = self.patch_embed_mri(x)
+        else:           # pan
+            inp = self.patch_embed_pan(x)
+        # inp = self.conv_in(x)
 
         x_index = [[0 for _ in range(self.width)] for _ in range(self.height)]
         i, j = 0, 0
@@ -416,7 +437,13 @@ class GridFormer(nn.Module):
             x_index[0][j] = self.TBM_module['{}_{}'.format(0, j - 1)](x_index[0][j - 1])
 
         for i in range(1, self.height):
-            x_index[i][0] = self.downsample_module['{}_{}'.format(i - 1, 0)](x_index[i - 1][0]) + self.extractor_module['{}_{}'.format(i-1, 0)](Image_index[i])
+            if C == 4:  # depth
+                x_index[i][0] = self.downsample_module['{}_{}'.format(i - 1, 0)](x_index[i - 1][0]) + self.extractor_module['{}_{}_{}'.format(i-1, 0,"dep")](Image_index[i])
+            elif C ==2: # mri
+                x_index[i][0] = self.downsample_module['{}_{}'.format(i - 1, 0)](x_index[i - 1][0]) + self.extractor_module['{}_{}_{}'.format(i-1, 0,"mri")](Image_index[i])
+            else:           # pan
+                x_index[i][0] = self.downsample_module['{}_{}'.format(i - 1, 0)](x_index[i - 1][0]) + self.extractor_module['{}_{}_{}'.format(i-1, 0,"pan")](Image_index[i])
+            
 
         for i in range(1, self.height):
             for j in range(1, self.width // 2):
@@ -449,20 +476,80 @@ class GridFormer(nn.Module):
 
         image_out = [0 for _ in range(self.height)]
 
-        image_out[0] = self.conv_out(self.TBM_out(x_index[i][j])) + Image_index[0]
+        if C == 4:  # depth
+            image_out[0] = self.output1(self.TBM_out(x_index[i][j])) + Image_index[0]
+        elif C ==2: # mri
+            image_out[0] = self.output2(self.TBM_out(x_index[i][j])) + Image_index[0]
+        else:           # pan
+            image_out[0] = self.output3(self.TBM_out(x_index[i][j])) + Image_index[0]
+        # image_out[0] = self.conv_out(self.TBM_out(x_index[i][j])) + Image_index[0]
+        t = self.output1(self.TBM_out(x_index[i][j]))
+        # print("image_out[0].shape",image_out[0].shape)
+        # print("t.shape",t.shape)
+        # print("Image_index[0].shape:",Image_index[0].shape)
+        # print("C:", C)
 
         for i in range(1,self.height):
-            image_out[i] = self.reconstruct_module['{}_{}'.format(i-1,j)](x_index[i][j])+Image_index[i]
+            if C == 4: # depth
+                image_out[i] = self.reconstruct_module['{}_{}_{}'.format(i-1,j,"dep")](x_index[i][j])+Image_index[i]
+            elif C == 2: # mri
+                image_out[i] = self.reconstruct_module['{}_{}_{}'.format(i-1,j,"mri")](x_index[i][j])+Image_index[i]
+            else:        # pan
+                image_out[i] = self.reconstruct_module['{}_{}_{}'.format(i-1,j,"pan")](x_index[i][j])+Image_index[i]
 
 
 
         return image_out
 
-    def forward(self, x):
-        x = self.forward_features(x)
+    def forward(self, inp_ms, inp_pan):
+        _, C1, H1, W1 = inp_ms.shape
+        _, C2, H2, W2 = inp_pan.shape
+        inp_ms = F.interpolate(inp_ms, size=(H2,W2), mode = "bilinear")
+        x = self.forward_features(inp_ms,inp_pan)
 
         x.reverse()
         return x
+
+if __name__ == '__main__':
+    from skimage.metrics import peak_signal_noise_ratio as PSNR
+    # from tools.evaluation_metric import calc_rmse
+    from loss.loss import CharbonnierLoss, PerceptualLoss
+
+    torch.cuda.set_device(0)
+    model = GridFormer().cuda()
+
+    lr = torch.randn(1,1,128,128).cuda()
+    guide = torch.randn(1,1,128,128).cuda()
+    gt = torch.randn(1,1,128,128).cuda()
+    output = model(lr,guide)[-1]
+
+    cri_pix = CharbonnierLoss(loss_weight=1.0, reduction="mean")
+    cri_perceptual = PerceptualLoss(layer_weights={'conv5_4': 1}, vgg_type="vgg19", use_input_norm=True,
+    range_norm=False, perceptual_weight=0.1, style_weight=0,criterion="l1")
+    # test_minmax = np.load('/data/cjj/dataset/NYU_V2/test_minmax.npy')
+    # print(output.shape)
+    # print(gt.shape)
+    # PSNR(gt.detach().numpy()[0], output.detach().cpu().numpy()[0])
+
+    pix_loss = cri_pix(output, gt)
+    if gt.shape[1] == 4:
+        rgb_output = output[:,0:3,:,:]
+        rgb_gt = gt[:,0:3,:,:]
+        ir_output = output[:,3:4,:,:].repeat(1,3,1,1)
+        ir_gt = gt[:,3:4,:,:].repeat(1,3,1,1)
+        l_percep_rgb, l_style_rgb = cri_perceptual(rgb_output, rgb_gt)
+        l_percep_ir, l_style_ir =cri_perceptual(ir_output, ir_gt)
+        l_percep = l_percep_rgb + l_percep_ir
+    else:
+        output = output.repeat(1,3,1,1)
+        gt = gt.repeat(1,3,1,1)
+        l_percep, l_style = cri_perceptual(output, gt)
+
+    print("pix_loss:", pix_loss)
+    print("l_percep", l_percep)
+    # loss = pix_loss + perceptual_loss
+    # print("loss: ",loss)
+    
 
 
 
