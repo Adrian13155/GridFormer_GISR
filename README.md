@@ -1,4 +1,10 @@
+# 对GridFormer修改以适应All-in One的引导超分任务
 
+## 如何跑通？
+
+* 由于GridFormer的损失会使用到vgg的网络，所以我们先要下载一下这个网络。可以直接运行一下`basicsr/archs/GridFormer_arch.py`，这个代码会自动跑一下GridFormer，然后会自动下载vgg
+
+* 然后就可以跑训练代码了`train_gridformer.py`，需要注意几个参数，`save_dir`是保存log和权重的目录，`pan_root`，`mri_root`，`depth_root`表示对应数据集的路径，`batch_size`默认是`4`，可以根据自己处理能力调整，`gpu_id`是对应的卡的id.
 
 
 # GridFormer: Residual Dense Transformer with Grid Structure for Image Restoration in Adverse Weather Conditions (IJCV 2024)

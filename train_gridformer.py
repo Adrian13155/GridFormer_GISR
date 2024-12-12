@@ -25,7 +25,7 @@ def get_opt():
     parser = argparse.ArgumentParser(description='Hyper-parameters for network')
     parser.add_argument('--exp_name', type=str, default='GridFormer', help='experiment name')
     parser.add_argument('-learning_rate', help='Set the learning rate', default=3e-4, type=float)
-    parser.add_argument('-batch_size', help='Set the training batch size', default=1, type=int)
+    parser.add_argument('-batch_size', help='Set the training batch size', default=4, type=int)
     parser.add_argument('-epoch_start', help='Starting epoch number of the training', default=0, type=int)
     parser.add_argument('-seed', help='set random seed', default=19, type=int)
     parser.add_argument('-num_epochs', help='', default=600, type=int)
@@ -33,6 +33,7 @@ def get_opt():
     parser.add_argument('-mri_root', help='', default='/data/wtt/MRI_align/BT', type=str)
     parser.add_argument('-pan_root', help='', default='/data/datasets/pansharpening/NBU_dataset0730', type=str)
     parser.add_argument('-save_dir', help='', default='/home/cjj/projects/AIO_compare/GridFormer/Checkpoint/GridFormer', type=str)
+    parser.add_argument('-gpu_id', help='', default=7, type=int)
     
     args = parser.parse_args()
     
@@ -285,5 +286,5 @@ def main(opt):
 
 if __name__ == '__main__':
     opt = get_opt()
-    torch.cuda.set_device(0)
+    torch.cuda.set_device(opt.gpu_id)
     main(opt)

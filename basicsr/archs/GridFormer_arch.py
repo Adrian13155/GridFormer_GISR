@@ -339,9 +339,9 @@ class reconstruct(nn.Module):
 # --- Main model  --- #
 class GridFormer(nn.Module):
     def __init__(self, #in_channels=3, out_channels=3,
-                 dim=48, kernel_size=3, stride=2, height=3, width=6, num_blocks=[2,3,4],
+                 dim=32, kernel_size=3, stride=2, height=3, width=6, num_blocks=[1,1,2],
                  growthRate=16,nDenselayer=3,
-                 heads=[2, 4, 8], attention=True, windows=4, sample_rate_trunk =[4,2,2], scale=1):
+                 heads=[2, 4, 8], attention=True, windows=4, sample_rate_trunk =[2,1,1], scale=1):
         super(GridFormer, self).__init__()
         self.TBM_module = nn.ModuleDict()
         self.upsample_module = nn.ModuleDict()
