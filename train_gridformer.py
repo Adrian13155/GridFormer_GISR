@@ -34,6 +34,7 @@ def get_opt():
     parser.add_argument('-pan_root', help='', default='/data/datasets/pansharpening/NBU_dataset0730', type=str)
     parser.add_argument('-save_dir', help='', default='/home/cjj/projects/AIO_compare/GridFormer/Checkpoint/GridFormer', type=str)
     parser.add_argument('-gpu_id', help='', default=7, type=int)
+    parser.add_argument('-checkpoint_path', help='', default="/home/cjj/projects/AIO_compare/GridFormer/Checkpoint/GridFormer/checkpoint_epoch_240.pth", type=str)
     
     args = parser.parse_args()
     
@@ -178,7 +179,7 @@ def main(opt):
     os.makedirs(opt.save_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=os.path.join(opt.save_dir, 'tensorboard_logs'))
 
-    logger = get_logger(os.path.join(opt.save_dir, 'run.log'))
+    logger = get_logger(os.path.join(opt.save_dir, 'run_continue.log'))
     logger.info(opt)
 
     # 在这里定义全局变量
@@ -236,6 +237,14 @@ def main(opt):
     cri_perceptual = PerceptualLoss(layer_weights={'conv5_4': 1}, vgg_type="vgg19", use_input_norm=True,
     range_norm=False, perceptual_weight=0.1, style_weight=0,criterion="l1")
 
+    start_epoch = opt.epoch_start
+    if os.path.exists(opt.checkpoint_path):
+        logger.info(f"Loading checkpoint from {opt.checkpoint_path}")
+        checkpoint = torch.load(opt.checkpoint_path)
+        Generator.load_state_dict(checkpoint['model_state_dict'])
+        optimizer_G.load_state_dict(checkpoint['optimizer_state_dict'])
+        lr_scheduler_G.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch']  + 1
     # logger.info("Running initial validation...")
     # metrics, improved = validate_one_epoch(
     #     Generator, list_val_dataset, test_minmax, logger, 0,
@@ -245,7 +254,7 @@ def main(opt):
 
     Generator.train()
 
-    for epoch in range(opt.epoch_start, opt.num_epochs):
+    for epoch in range(start_epoch, opt.num_epochs):
         mix_dataset.shuffle()
         train_dataloader = DataLoader(
             mix_dataset, 
@@ -262,11 +271,17 @@ def main(opt):
                 epoch, train_dataloader, Generator, optimizer_G, cri_pix, cri_perceptual, writer)
             
             lr_scheduler_G.step()
-
+            flag = False
             if epoch < 250 and epoch % 15 == 0:
+                flag = True
+                metrics, improved = validate_one_epoch(Generator, list_val_dataset, test_minmax, 
+                                    logger, epoch, writer, opt.save_dir, optimizer_G, lr_scheduler_G)
+            elif epoch >=250 and epoch % 7 == 0:
+                flag = True
                 metrics, improved = validate_one_epoch(Generator, list_val_dataset, test_minmax, 
                                     logger, epoch, writer, opt.save_dir, optimizer_G, lr_scheduler_G)
 
+            if flag:
                 checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': Generator.state_dict(),
